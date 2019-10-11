@@ -1,0 +1,60 @@
+public Amount availableBudget()
+{
+
+    Ledger ledger;
+    LedgerDimensionBase ledgerDim, ledDim;
+    TrvCostType costType = TrvCostType::find(this.KREKategoriBiayaID);
+    CategoryTable categoryTable = CategoryTable::find(this.KREKategoriBiayaID);
+    BudgetControlBudgetCycle budgetControlBudgetCycle;
+
+    select ledger
+        where ledger.Name == curExt();
+
+    ledgerDim = LedgerDimensionFacade::serviceCreateLedgerDimension(costType.LedgerDimension, categoryTable.KREDefaultDimension, this.OffsetDefaultDimension);
+
+    ledDim = LedgerDimensionFacade::serviceMergeLedgerDimensions(ledgerDim, ledgerDim, LedgerDimensionType::BudgetControl);
+
+    BudgetCycleTimeSpan     BudgetCycleTimeSpan;
+
+    select BudgetCycleTimeSpan
+        where BudgetCycleTimeSpan.FiscalCalendar == ledger.FiscalCalendar;
+
+    BudgetCycle budgetCycle = BudgetCycle::findBudgetCycleByDate(BudgetCycleTimeSpan.RecId, today());
+
+    select budgetControlBudgetCycle
+        where budgetControlBudgetCycle.BudgetCycle == budgetCycle.RecId;
+
+    BudgetControlStatisticsRequest request = BudgetControlStatisticsRequest::construct();
+    request.parmPrimaryLedgerRecId(Ledger::current());
+    request.parmStartDate(mkDate(1, 1, year(today())));
+    request.parmEndDate(mkDate(31, 12, year(today())));
+    request.parmBudgetCycleRecId(budgetCycle.RecId);
+    request.parmBudgetModelId(budgetControlBudgetCycle.BudgetModelId);
+    request.parmIncludeCarryForward(BudgetControlStatisticsCarryForwardOption::NotIncluded);
+
+    BudgetControlStatisticsManager manager = new BudgetControlStatisticsManager();
+    BudgetTmpControlStatisticsByDimension budgetTmpControlStatisticsByDimensionLocal =
+            manager.populateBudgetTmpControlStatisticsByDimension(request);
+
+    if(this.KREPcId != '' && this.KREKategoriBiayaID != '')
+    {
+        DimensionCombinationNameTmp dimensionCombinationNameTmp;
+        insert_recordset dimensionCombinationNameTmp (DimensionAttributeValueCombination)
+            select BudgetControlLedgerDimension from budgetTmpControlStatisticsByDimensionLocal
+            group by budgetTmpControlStatisticsByDimensionLocal.BudgetControlLedgerDimension;
+
+        DimensionCombinationNameTmp::getDimensionCombinationNames(dimensionCombinationNameTmp);
+
+        update_recordset budgetTmpControlStatisticsByDimensionLocal
+            setting BudgetControlLedgerDimensionName = dimensionCombinationNameTmp.Name
+            join dimensionCombinationNameTmp
+                where dimensionCombinationNameTmp.DimensionAttributeValueCombination
+                    == budgetTmpControlStatisticsByDimensionLocal.BudgetControlLedgerDimension;
+
+        select budgetTmpControlStatisticsByDimensionLocal
+            where budgetTmpControlStatisticsByDimensionLocal.BudgetControlLedgerDimension == ledDim;
+
+    }
+
+    return budgetTmpControlStatisticsByDimensionLocal.TotalBudgetFundsAvailable;
+}
